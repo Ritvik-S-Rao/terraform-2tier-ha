@@ -1,15 +1,20 @@
-# Terraform local state and runtime files
-.terraform/
-.terraform.lock.hcl
+# Local .terraform directories
+**/.terraform/*
+
+# .tfstate files
 *.tfstate
 *.tfstate.*
-*.tfvars
-*.tfvars.json
+
+# Crash log files
 crash.log
 crash.*.log
+
+# Exclude all .tfvars files
+*.tfvars
+*.tfvars.json
+
+# Ignore override files
 override.tf
 override.tf.json
 *_override.tf
 *_override.tf.json
-.terraformrc
-terraform.rc

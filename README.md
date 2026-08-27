@@ -120,4 +120,4 @@ cd ../01-backend && terraform destroy
 
 - Region is hardcoded to `us-east-1` in both stacks.
 - The `01-backend` S3 bucket has `force_destroy = true` and RDS uses `skip_final_snapshot = true` — convenient for a lab/demo environment, but you'll want to remove both before using this pattern in production.
-- `.terraform/`, `.terraform.lock.hcl`, and all `*.tfstate*`/`*.tfvars*` files are gitignored and should never be committed.
+- .terraform/ and all *.tfstate*/*.tfvars* files are gitignored and should never be committed. The .terraform.lock.hcl file is committed to ensure consistent provider versions.
