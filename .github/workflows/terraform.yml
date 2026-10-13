@@ -1,0 +1,111 @@
+name: "Terraform CI CD"
+
+on:
+  pull_request:
+    paths:
+      - '02-infrastructure/**'
+  push:
+    branches:
+      - main
+    paths:
+      - '02-infrastructure/**'
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: "Terraform Plan"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: 02-infrastructure
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Terraform Init
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query "Account" --output text)
+          STATE_BUCKET="devops-2tier-tfstate-${ACCOUNT_ID}"
+          STATE_TABLE="devops-2tier-tfstate-locks"
+
+          terraform init \
+            -backend-config="bucket=${STATE_BUCKET}" \
+            -backend-config="dynamodb_table=${STATE_TABLE}" \
+            -backend-config="key=02-infrastructure/terraform.tfstate" \
+            -backend-config="region=us-east-1"
+
+      - name: Terraform Format and Validate
+        run: |
+          terraform fmt -check
+          terraform validate
+
+      - name: Terraform Plan
+        run: terraform plan -no-color -out=tfplan
+
+      - name: Upload Plan Artifact
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: 02-infrastructure/tfplan
+          retention-days: 1
+
+  apply:
+    name: "Terraform Apply"
+    needs: plan
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    defaults:
+      run:
+        working-directory: 02-infrastructure
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Terraform Init
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query "Account" --output text)
+          STATE_BUCKET="devops-2tier-tfstate-${ACCOUNT_ID}"
+          STATE_TABLE="devops-2tier-tfstate-locks"
+
+          terraform init \
+            -backend-config="bucket=${STATE_BUCKET}" \
+            -backend-config="dynamodb_table=${STATE_TABLE}" \
+            -backend-config="key=02-infrastructure/terraform.tfstate" \
+            -backend-config="region=us-east-1"
+
+      - name: Download Plan Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan
+          path: 02-infrastructure
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve tfplan
