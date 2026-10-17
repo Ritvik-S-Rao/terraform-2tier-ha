@@ -38,9 +38,9 @@ module "compute" {
   vpc_id                 = module.network.vpc_id
   public_subnet_ids      = module.network.public_subnet_ids
   private_app_subnet_ids = module.network.private_app_subnet_ids
-  
-  alb_security_group_id  = module.security.alb_security_group_id
-  app_security_group_id  = module.security.app_security_group_id
+
+  alb_security_group_id = module.security.alb_security_group_id
+  app_security_group_id = module.security.app_security_group_id
 }
 
 module "database" {
@@ -48,5 +48,5 @@ module "database" {
 
   private_data_subnet_ids = module.network.private_data_subnet_ids
   db_security_group_id    = module.security.db_security_group_id
-  db_password = data.aws_ssm_parameter.rds_password.value
+  db_password             = data.aws_ssm_parameter.rds_password.value
 }
