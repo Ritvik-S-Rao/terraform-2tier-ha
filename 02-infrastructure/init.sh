@@ -1,13 +1,14 @@
 #!/bin/bash
-# Dynamically fetch backend details from the 01-backend state vault
-STATE_BUCKET=$(cd ../01-backend && terraform output -raw s3_bucket_name)
-STATE_TABLE=$(cd ../01-backend && terraform output -raw dynamodb_table_name)
 
-echo "Initializing Terraform with dynamic backend..."
+# Query AWS to get your account ID
+ACCOUNT_ID=$(aws sts get-caller-identity --query "Account" --output text)
+STATE_BUCKET="devops-2tier-tfstate-${ACCOUNT_ID}"
+STATE_TABLE="terraform-2tier-state-locks"
 
-terraform init -reconfigure\
+echo "Initializing Terraform with predicted backend: ${STATE_BUCKET}..."
+
+terraform init -reconfigure \
   -backend-config="bucket=${STATE_BUCKET}" \
-  -backend-config="key=infrastructure/terraform.tfstate" \
+  -backend-config="key=02-infrastructure/terraform.tfstate" \
   -backend-config="region=us-east-1" \
-  -backend-config="dynamodb_table=${STATE_TABLE}" \
-  -backend-config="encrypt=true"
+  -backend-config="dynamodb_table=${STATE_TABLE}"

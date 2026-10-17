@@ -23,10 +23,12 @@ resource "random_id" "bucket_suffix" {
   byte_length = 4
 }
 
+# Fetch your AWS Account ID dynamically
+data "aws_caller_identity" "current" {}
 
 # 1. S3 Bucket for Remote State Storage
 resource "aws_s3_bucket" "state_bucket" {
-  bucket        = "devops-tfstate-2tier-${random_id.bucket_suffix.hex}"
+  bucket        = "devops-2tier-tfstate-${data.aws_caller_identity.current.account_id}"
   force_destroy = true # Allows clean teardown during project deletion
 
   tags = {
