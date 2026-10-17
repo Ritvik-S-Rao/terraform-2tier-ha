@@ -3,7 +3,7 @@
 # Query AWS to get your account ID
 ACCOUNT_ID=$(aws sts get-caller-identity --query "Account" --output text)
 STATE_BUCKET="devops-2tier-tfstate-${ACCOUNT_ID}"
-STATE_TABLE="devops-2tier-tfstate-locks"
+STATE_TABLE="terraform-2tier-state-locks"
 
 echo "Initializing Terraform with predicted backend: ${STATE_BUCKET}..."
 
