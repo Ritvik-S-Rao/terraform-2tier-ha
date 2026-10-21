@@ -1,11 +1,11 @@
 # terraform-2tier-ha
 
-Terraform code that provisions a highly-available, two-tier web application on AWS: a public Application Load Balancer fronting an Auto Scaling Group of EC2 instances in private subnets, backed by a MySQL RDS instance in isolated data subnets. Remote state is managed in a separate bootstrap stack using S3 + DynamoDB.
+Terraform code that provisions a highly-available, two-tier web application on AWS: a public Application Load Balancer fronting an Auto Scaling Group of EC2 instances in private subnets, backed by a MySQL RDS instance in isolated data subnets. Remote state is managed in a separate bootstrap stack using S3 + DynamoDB, and the core infrastructure is deployed via a fully automated GitHub Actions CI/CD pipeline.
 
 ## Architecture
 
-```
-                         Internet                          
+```text
+                         Internet                         
                              │                             
                              ▼                             
                   ┌─────────────────────┐
@@ -31,7 +31,7 @@ Terraform code that provisions a highly-available, two-tier web application on A
 ┌─────────────────────────────────────────────────────────┐
 │              PRIVATE DATA SUBNETS (2 AZs)               │
 │                                                         │
-│                      RDS MySQL 8.0                      │
+│                    RDS MySQL 8.0                        │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -41,18 +41,29 @@ Terraform code that provisions a highly-available, two-tier web application on A
 - **Compute**: Application Load Balancer → Target Group → Auto Scaling Group (min 2 / desired 2 / max 4) running Amazon Linux 2023 with Apache (`httpd`), bootstrapped via `user_data` to serve a page showing the instance ID and AZ.
 - **Database**: Single-AZ RDS MySQL 8.0 (`db.t3.micro`, 20GB gp3). Multi-AZ is intentionally disabled to keep learning/lab costs down — see note in `modules/database/main.tf`.
 
+## CI/CD Pipeline
+
+Deployments are automated using GitHub Actions (`.github/workflows/terraform.yml`). 
+
+- **Pull Requests:** Any PR modifying the `02-infrastructure` directory triggers a code formatting check (`terraform fmt -check`), validation, and a `terraform plan`.
+- **Main Branch Merges:** Merging to `main` triggers the `apply` job.
+- **Dynamic Backend:** The pipeline uses the AWS CLI to fetch your AWS Account ID dynamically at runtime, avoiding hardcoded S3 bucket names in the workflow file.
+- **Approval Gates:** The deployment is tied to a GitHub Environment named `production`. The pipeline pauses after a successful plan and requires manual approval before executing `terraform apply`.
+
 ## Repository structure
 
-```
+```text
 terraform-2tier-ha/
+├── .github/workflows/
+│   └── terraform.yml        # CI/CD pipeline for automated planning and deployment
 ├── 01-backend/              # Bootstrap stack: remote state backend
 │   └── main.tf              # S3 bucket (encrypted, public access blocked) + DynamoDB lock table
 │
 └── 02-infrastructure/        # Main application stack
     ├── backend.tf            # Empty S3 backend block (configured at init time)
-    ├── main.tf                # Root module: wires network/security/compute/database together
+    ├── main.tf               # Root module: wires network/security/compute/database together
     ├── outputs.tf             # website_url, database_endpoint
-    ├── init.sh                # Fetches backend config from 01-backend and runs terraform init
+    ├── init.sh               # Fetches backend config dynamically for local testing
     └── modules/
         ├── network/           # VPC, subnets (public/app/data), IGW, NAT GW, route tables
         ├── security/           # Security groups for ALB, app tier, and database
@@ -60,13 +71,11 @@ terraform-2tier-ha/
         └── database/           # DB subnet group + RDS MySQL instance
 ```
 
-This is a two-stage setup: `01-backend` must be applied first to create the S3/DynamoDB backend that `02-infrastructure` then uses to store its own state remotely.
-
 ## Prerequisites
 
 - [Terraform](https://developer.hashicorp.com/terraform/downloads) >= 1.5.0
 - An AWS account and credentials configured (e.g. via `aws configure` or environment variables)
-- **The RDS master password must exist in SSM Parameter Store *before* you run `terraform plan`.** `02-infrastructure/main.tf` reads it via a data source (`data.aws_ssm_parameter`), and data sources are resolved during plan, not apply — so a missing parameter fails the very first `terraform plan`, not just the deploy step:
+- **AWS SSM Parameter:** The RDS master password must exist in SSM Parameter Store *before* the pipeline runs. `02-infrastructure/main.tf` reads it via a data source, which is resolved during the plan phase:
 
   ```bash
   aws ssm put-parameter \
@@ -75,33 +84,39 @@ This is a two-stage setup: `01-backend` must be applied first to create the S3/D
     --value "<choose-a-strong-password>" \
     --region us-east-1
   ```
-
-  The IAM identity running Terraform needs `ssm:GetParameter` on this path (and `kms:Decrypt` if the parameter is encrypted with a customer-managed KMS key rather than the default `aws/ssm` key).
+- **GitHub Secrets:** Add your AWS CI IAM user credentials to your repository secrets:
+  - `AWS_ACCESS_KEY_ID`
+  - `AWS_SECRET_ACCESS_KEY`
+- **GitHub Environments:** Create an environment named `production` in your repository settings and configure yourself as a Required Reviewer to enable the manual deployment gate.
 
 ## Usage
 
-### 1. Bootstrap the remote state backend
+### 1. Bootstrap the remote state backend (Local)
+
+The backend must be created locally first so the CI pipeline has a place to store the state file.
 
 ```bash
 cd 01-backend
 terraform init
-terraform apply
+terraform apply -auto-approve
 ```
 
-Note the `s3_bucket_name` and `dynamodb_table_name` outputs — the next step reads these automatically.
+### 2. Deploy the infrastructure (Automated via CI/CD)
 
-### 2. Deploy the infrastructure
+1. Create a new branch and push your infrastructure changes to GitHub.
+2. Open a Pull Request. The GitHub Actions runner will automatically execute `terraform plan`.
+3. Merge the Pull Request to `main`.
+4. Navigate to the **Actions** tab in GitHub, review the pending deployment, and click **Approve and deploy** for the `production` environment. 
 
-```bash
-cd ../02-infrastructure
-./init.sh          # configures the S3 backend using outputs from 01-backend
-terraform plan
-terraform apply
-```
+*(If you need to test changes locally before pushing, run `./init.sh` inside `02-infrastructure` to configure your local backend).*
 
 ### 3. Access the app
 
+Once the pipeline completes, you can pull the load balancer URL locally:
+
 ```bash
+cd 02-infrastructure
+./init.sh
 terraform output website_url
 ```
 
@@ -109,11 +124,15 @@ Open the URL in a browser — each refresh may land on a different instance/AZ, 
 
 ### Tearing down
 
-Destroy in reverse order:
+To avoid lingering AWS charges, destroy the infrastructure in reverse order from your local machine:
 
 ```bash
-cd 02-infrastructure && terraform destroy
-cd ../01-backend && terraform destroy
+cd 02-infrastructure 
+./init.sh
+terraform destroy
+
+cd ../01-backend 
+terraform destroy
 ```
 
 ## Notes
